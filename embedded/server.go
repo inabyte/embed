@@ -110,7 +110,6 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			s.toHTTPError(w, r, os.ErrPermission)
 		}
-		s.sys.ServeHTTP(w, r)
 		return
 	}
 
