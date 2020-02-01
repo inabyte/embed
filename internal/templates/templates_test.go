@@ -6,6 +6,7 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"github.com/inabyte/embed/embedded"
+	"os"
 	"testing"
 )
 
@@ -16,9 +17,10 @@ func TestFileServer(t *testing.T) {
 }
 
 func TestBytes(t *testing.T) {
-	FS.Walk(func(path string, info embedded.FileInfo) error {
+	FS.Walk("/", func(path string, info os.FileInfo, err error) error {
 		if !info.IsDir() {
-			if getTag(info.Bytes()) != info.Tag() {
+			linfo := info.(embedded.FileInfo)
+			if getTag(linfo.Bytes()) != linfo.Tag() {
 				t.Errorf("checksum for file %s doesn't match recorded", path)
 			}
 		}
@@ -27,10 +29,11 @@ func TestBytes(t *testing.T) {
 }
 
 func TestString(t *testing.T) {
-	FS.Walk(func(path string, info embedded.FileInfo) error {
+	FS.Walk("/", func(path string, info os.FileInfo, err error) error {
 		if !info.IsDir() {
-			s := info.String()
-			if getTag([]byte(s)) != info.Tag() {
+			linfo := info.(embedded.FileInfo)
+			s := linfo.String()
+			if getTag([]byte(s)) != linfo.Tag() {
 				t.Errorf("checksum for file %s doesn't match recorded {%s}", path, s)
 			}
 		}
