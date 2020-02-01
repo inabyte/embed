@@ -6,11 +6,8 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
 	syslog "log"
 	"os"
-	"os/exec"
-	"path/filepath"
 
 	"github.com/inabyte/embed"
 )
@@ -55,15 +52,7 @@ Where: <files> list of files and/or folders to embed
 	if len(f.Args()) < 1 {
 		showError(f, "No files/folders specified")
 	} else {
-		var err error
-
-		if conf.Binary {
-			err = createBinary(conf)
-		} else {
-			err = conf.Generate()
-		}
-
-		if err != nil {
+		if err := conf.Generate(); err != nil {
 			showError(f, err)
 		}
 	}
@@ -73,46 +62,4 @@ func showError(f *flag.FlagSet, v ...interface{}) {
 	log.Print(v...)
 	f.Usage()
 	myExit(2)
-}
-
-func createBinary(conf *embed.Config) error {
-	var (
-		err     error
-		outfile string
-		base    string
-	)
-
-	outfile = conf.Output
-	if !filepath.IsAbs(outfile) {
-		outfile, err = os.Getwd()
-		if err == nil {
-			outfile = filepath.Join(outfile, conf.Output)
-		}
-	}
-
-	if err == nil {
-		conf.Local = true
-		conf.DisableCompression = false
-		conf.Package = "main"
-
-		base, err = ioutil.TempDir("", "embed-generate")
-	}
-
-	if err == nil {
-		defer os.RemoveAll(base)
-
-		conf.Output = filepath.Join(base, "main")
-		err = conf.Generate()
-	}
-
-	if err == nil {
-		cmd := exec.Command("go", "build", "-o", outfile, "-ldflags", "-s")
-		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
-		cmd.Dir = base
-		cmd.Stderr = os.Stderr
-		cmd.Stdout = os.Stdout
-		err = cmd.Run()
-	}
-
-	return err
 }

@@ -13,6 +13,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -55,11 +56,52 @@ func (fs *files) Open(name string) (file http.File, err error) {
 	return
 }
 
-func (fs *files) Walk(walkFn WalkFunc) (err error) {
-	for key, value := range fs.list {
-		if err == nil {
-			err = walkFn(key, value)
+// walk recursively descends path, calling walkFn.
+func (fs *files) walk(fpath string, info os.FileInfo, walkFn filepath.WalkFunc) (err error) {
+	if !info.IsDir() {
+		return walkFn(fpath, info, nil)
+	}
+
+	f := info.(*file)
+	err1 := walkFn(fpath, info, err)
+	// If err != nil, walk can't walk into this directory.
+	// err1 != nil means walkFn want walk to skip this directory or stop walking.
+	// Therefore, if one of err and err1 isn't nil, walk will return.
+	if err != nil || err1 != nil {
+		// The caller's behavior is controlled by the return value, which is decided
+		// by walkFn. walkFn may ignore err and return nil.
+		// If walkFn returns SkipDir, it will be handled by the caller.
+		// So walk should return whatever walkFn returns.
+		return err1
+	}
+
+	for _, entry := range f.subFiles {
+		filename := path.Join(fpath, entry.Name())
+		fileInfo := entry.(*file)
+		err = fs.walk(filename, fileInfo, walkFn)
+		if err != nil {
+			if !fileInfo.IsDir() || err != filepath.SkipDir {
+				return
+			}
 		}
+	}
+
+	return
+}
+
+// Walk walks the file tree rooted at root, calling walkFn for each file or
+// directory in the tree, including root. All errors that arise visiting files
+// and directories are filtered by walkFn. The files are walked in lexical
+// order, which makes the output deterministic but means that for very
+// large directories Walk can be inefficient.
+func (fs *files) Walk(root string, walkFn filepath.WalkFunc) (err error) {
+	if info, ok := fs.list[root]; !ok {
+		err = walkFn(root, nil, os.ErrNotExist)
+	} else {
+		err = fs.walk(root, info, walkFn)
+	}
+	if err == filepath.SkipDir {
+		err = nil
 	}
 
 	return
@@ -68,7 +110,7 @@ func (fs *files) Walk(walkFn WalkFunc) (err error) {
 func (fs *files) Copy(target string, mode os.FileMode) error {
 	mode = mode & 0777
 	dirmode := os.ModeDir | ((mode & 0444) >> 2) | mode
-	return fs.Walk(func(path string, info FileInfo) error {
+	return fs.Walk("/", func(path string, info os.FileInfo, err error) error {
 		targetPath := filepath.Join(target, path)
 		if info.IsDir() {
 			return os.MkdirAll(targetPath, dirmode)
@@ -117,24 +159,20 @@ func (fs *files) AddFile(path string, name string, local string, size int64, mod
 }
 
 // AddFolder Adds a folder to the file system
-func (fs *files) AddFolder(path string, name string, local string, modtime int64) {
-	fs.list[path] = &file{
-		name:    name,
-		local:   local,
-		isDir:   true,
-		modtime: modtime,
-	}
-}
-
-// SetFiles Adds list of file to a folder
-func (fs *files) SetFiles(path string, paths ...string) {
+func (fs *files) AddFolder(path string, name string, local string, modtime int64, paths ...string) {
 	subFiles := make([]os.FileInfo, len(paths))
 
 	for i, e := range paths {
 		subFiles[i] = fs.list[e]
 	}
 
-	fs.list[path].subFiles = subFiles
+	fs.list[path] = &file{
+		name:     name,
+		local:    local,
+		isDir:    true,
+		modtime:  modtime,
+		subFiles: subFiles,
+	}
 }
 
 func (fs *files) UseLocal(value bool) {
