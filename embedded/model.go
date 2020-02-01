@@ -8,6 +8,7 @@ package embedded
 import (
 	"net/http"
 	"os"
+	"path/filepath"
 )
 
 // FileSystem defines the FileSystem interface and builder
@@ -15,7 +16,7 @@ type FileSystem interface {
 	http.FileSystem
 
 	// Walk all folders and files in the filesystem
-	Walk(walkFn WalkFunc) error
+	Walk(root string, walkFn filepath.WalkFunc) error
 
 	// Copy all files to target directory
 	Copy(target string, mode os.FileMode) error
@@ -23,9 +24,7 @@ type FileSystem interface {
 	// AddFile add a file to embedded filesystem
 	AddFile(path string, name string, local string, size int64, modtime int64, mimeType string, tag string, compressed bool, data []byte, str string)
 	// AddFolder add a file to embedded filesystem
-	AddFolder(path string, name string, local string, modtime int64)
-	// SetFiles set list of files contained in the folder
-	SetFiles(path string, paths ...string)
+	AddFolder(path string, name string, local string, modtime int64, paths ...string)
 
 	// UseLocal use on disk copy instead of embedded data (for development)
 	UseLocal(bool)
@@ -40,9 +39,6 @@ type FileInfo interface {
 	String() string   // file contents as string
 	Bytes() []byte    // file contents as byte array
 }
-
-// WalkFunc called for each folder and file in the filesystem
-type WalkFunc func(path string, info FileInfo) error
 
 // Handler serves embedded handle to serve FileSystem
 type Handler interface {

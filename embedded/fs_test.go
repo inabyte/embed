@@ -34,6 +34,34 @@ var (
 	indexTag        = tag(indexBytes)
 )
 
+func TestWalk(t *testing.T) {
+	dir, f := makeFs()
+	defer os.RemoveAll(dir)
+
+	for _, test := range []struct {
+		name   string
+		file   string
+		err    error
+		expect []string
+	}{
+		{"Bad Path", "bad", nil, []string{"bad"}},
+		{"Good", "/", nil, []string{"/", "/index.html", "/settings.html", "/files", "/files/js", "/files/js/index.html"}},
+		{"Skip", "/", filepath.SkipDir, []string{"/"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var list []string
+			f.Walk(test.file, func(path string, info os.FileInfo, err error) error {
+				list = append(list, path)
+				return test.err
+			})
+
+			if !reflect.DeepEqual(list, test.expect) {
+				t.Errorf("Did not wlak file as expected got(%v) expect (%v)", list, test.expect)
+			}
+		})
+	}
+}
+
 func TestFiles(t *testing.T) {
 
 	dir, f := makeFs()
@@ -166,30 +194,24 @@ func makeFs() (string, FileSystem) {
 		filepath.Join(tmpdir, "files", "fs", "index.html"),
 		indexSize, setTime, mimeType, indexTag, true, indexCompressed, string(indexCompressed))
 
-	f.AddFolder("/", "/",
-		tmpdir,
-		setTime)
+	f.AddFolder("/files/js", "js",
+		filepath.Join(tmpdir, "files", "js"),
+		setTime,
+		"/files/fs/index.html",
+	)
 
 	f.AddFolder("/files", "files",
 		filepath.Join(tmpdir, "files"),
-		setTime)
-
-	f.AddFolder("/files/js", "js",
-		filepath.Join(tmpdir, "files", "js"),
-		setTime)
-
-	f.SetFiles("/",
-		"/index.html",
-		"/settings.html",
-		"/files",
-	)
-
-	f.SetFiles("/files",
+		setTime,
 		"/files/js",
 	)
 
-	f.SetFiles("/files/js",
-		"/files/fs/index.html",
+	f.AddFolder("/", "/",
+		tmpdir,
+		setTime,
+		"/index.html",
+		"/settings.html",
+		"/files",
 	)
 
 	f.Copy(tmpdir, os.ModePerm)
