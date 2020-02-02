@@ -43,6 +43,7 @@ Where: <files> list of files and/or folders to embed
 	f.StringVar(&conf.ModifyTime, "modifytime", conf.ModifyTime, "Unix timestamp to override as modification time for all files.")
 	f.BoolVar(&conf.DisableCompression, "no-compress", conf.DisableCompression, "If true, do not compress files.")
 	f.BoolVar(&conf.Go, "go", conf.Go, "write only go files")
+	f.BoolVar(&conf.FileServer, "fileserver", conf.Binary, "produce http server code")
 	f.BoolVar(&conf.Binary, "binary", conf.Binary, "produce self-contained extracter/http server binary (<output> will become the binary name)")
 	f.BoolVar(&conf.Local, "local", conf.Local, "If true, do not reference external files.")
 	f.Parse(os.Args[1:])

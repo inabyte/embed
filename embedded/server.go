@@ -13,6 +13,16 @@ import (
 	"strings"
 )
 
+// Handler serves embedded handle to serve FileSystem
+type Handler interface {
+	http.Handler
+	// SetNotFoundHandler set a hander to be called for no found
+	SetNotFoundHandler(http.Handler)
+	// If true and the folder does not contain index.html render folder
+	// otherwise return 403 http.StatusForbidden
+	SetRenderFolders(enable bool)
+}
+
 type server struct {
 	http.FileSystem
 	notFound      http.Handler

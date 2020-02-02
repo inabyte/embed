@@ -19,6 +19,60 @@ import (
 	"time"
 )
 
+// FileSystem defines the FileSystem interface and builder
+type FileSystem interface {
+	http.FileSystem
+
+	// Walk walks the file tree rooted at root, calling walkFn for each file or
+	// directory in the tree, including root. All errors that arise visiting files
+	// and directories are filtered by walkFn. The files are walked in lexical
+	// order.
+	Walk(root string, walkFn WalkFunc) error
+
+	// Copy all files to target directory
+	Copy(target string, mode os.FileMode) error
+
+	// AddFile add a file to embedded filesystem
+	AddFile(path string, name string, local string, size int64, modtime int64, mimeType string, tag string, compressed bool, data []byte, str string)
+	// AddFolder add a file to embedded filesystem
+	AddFolder(path string, name string, local string, modtime int64, paths ...string)
+
+	// UseLocal use on disk copy instead of embedded data (for development)
+	UseLocal(bool)
+}
+
+// SkipDir is used as a return value from WalkFuncs to indicate that
+// the directory named in the call is to be skipped. It is not returned
+// as an error by any function.
+var SkipDir = filepath.SkipDir
+
+// WalkFunc is the type of the function called for each file or directory
+// visited by Walk. The path argument contains the argument to Walk as a
+// prefix; that is, if Walk is called with "dir", which is a directory
+// containing the file "a", the walk function will be called with argument
+// "dir/a". The info argument is the os.FileInfo for the named path.
+//
+// If there was a problem walking to the file or directory named by path, the
+// incoming error will describe the problem and the function can decide how
+// to handle that error (and Walk will not descend into that directory). In the
+// case of an error, the info argument will be nil. If an error is returned,
+// processing stops. The sole exception is when the function returns the special
+// value SkipDir. If the function returns SkipDir when invoked on a directory,
+// Walk skips the directory's contents entirely. If the function returns SkipDir
+// when invoked on a non-directory file, Walk skips the remaining files in the
+// containing directory.
+type WalkFunc func(path string, info FileInfo, err error) error
+
+// FileInfo internal file info and file contents
+type FileInfo interface {
+	os.FileInfo
+	Compressed() bool // Is this file compressed
+	Tag() string      // Etag for the file contents
+	MimeType() string // file contens mimetype
+	String() string   // file contents as string
+	Bytes() []byte    // file contents as byte array
+}
+
 type file struct {
 	name       string
 	size       int64
@@ -30,7 +84,7 @@ type file struct {
 	tag        string
 	data       []byte
 	str        string
-	subFiles   []os.FileInfo
+	subFiles   []FileInfo
 }
 
 type files struct {
@@ -57,7 +111,7 @@ func (fs *files) Open(name string) (file http.File, err error) {
 }
 
 // walk recursively descends path, calling walkFn.
-func (fs *files) walk(fpath string, info os.FileInfo, walkFn filepath.WalkFunc) (err error) {
+func (fs *files) walk(fpath string, info FileInfo, walkFn WalkFunc) (err error) {
 	if !info.IsDir() {
 		return walkFn(fpath, info, nil)
 	}
@@ -80,7 +134,7 @@ func (fs *files) walk(fpath string, info os.FileInfo, walkFn filepath.WalkFunc) 
 		fileInfo := entry.(*file)
 		err = fs.walk(filename, fileInfo, walkFn)
 		if err != nil {
-			if !fileInfo.IsDir() || err != filepath.SkipDir {
+			if !fileInfo.IsDir() || err != SkipDir {
 				return
 			}
 		}
@@ -92,15 +146,14 @@ func (fs *files) walk(fpath string, info os.FileInfo, walkFn filepath.WalkFunc) 
 // Walk walks the file tree rooted at root, calling walkFn for each file or
 // directory in the tree, including root. All errors that arise visiting files
 // and directories are filtered by walkFn. The files are walked in lexical
-// order, which makes the output deterministic but means that for very
-// large directories Walk can be inefficient.
-func (fs *files) Walk(root string, walkFn filepath.WalkFunc) (err error) {
+// order.
+func (fs *files) Walk(root string, walkFn WalkFunc) (err error) {
 	if info, ok := fs.list[root]; !ok {
 		err = walkFn(root, nil, os.ErrNotExist)
 	} else {
 		err = fs.walk(root, info, walkFn)
 	}
-	if err == filepath.SkipDir {
+	if err == SkipDir {
 		err = nil
 	}
 
@@ -110,7 +163,7 @@ func (fs *files) Walk(root string, walkFn filepath.WalkFunc) (err error) {
 func (fs *files) Copy(target string, mode os.FileMode) error {
 	mode = mode & 0777
 	dirmode := os.ModeDir | ((mode & 0444) >> 2) | mode
-	return fs.Walk("/", func(path string, info os.FileInfo, err error) error {
+	return fs.Walk("/", func(path string, info FileInfo, err error) error {
 		targetPath := filepath.Join(target, path)
 		if info.IsDir() {
 			return os.MkdirAll(targetPath, dirmode)
@@ -160,7 +213,7 @@ func (fs *files) AddFile(path string, name string, local string, size int64, mod
 
 // AddFolder Adds a folder to the file system
 func (fs *files) AddFolder(path string, name string, local string, modtime int64, paths ...string) {
-	subFiles := make([]os.FileInfo, len(paths))
+	subFiles := make([]FileInfo, len(paths))
 
 	for i, e := range paths {
 		subFiles[i] = fs.list[e]
@@ -298,10 +351,13 @@ func (r *reader) Readdir(count int) (list []os.FileInfo, err error) {
 				if count <= 0 || int64(count) > l-r.position {
 					count = int(l - r.position)
 				}
-				list = r.subFiles[r.position : r.position+int64(count)]
+				entries := r.subFiles[r.position : r.position+int64(count)]
 				r.position += int64(count)
+				list = make([]os.FileInfo, len(entries))
+				for i, e := range entries {
+					list[i] = e
+				}
 			}
-
 		} else {
 			err = errors.New("reader.Readdir: not valid on file")
 		}

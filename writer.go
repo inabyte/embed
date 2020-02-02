@@ -24,6 +24,7 @@ type writer interface {
 }
 
 type asmWriter struct {
+	name        string
 	buf         [lineSize]byte
 	strBuf      [lineSize * 4]byte
 	index       int
@@ -33,6 +34,7 @@ type asmWriter struct {
 }
 
 type goWriter struct {
+	name        string
 	buf         [lineSize]byte
 	strBuf      [lineSize * 4]byte
 	index       int
@@ -40,14 +42,6 @@ type goWriter struct {
 	dataOffset  int64
 	writeOffset int64
 }
-
-type asmFile struct {
-	name      string
-	buildTags string
-	code      string
-}
-
-type asmFiles []asmFile
 
 func createFile(path string, name string, extension string) (file *os.File, err error) {
 
@@ -98,11 +92,11 @@ func createWriteHeaderInclude(path string, name string, extension string, tags .
 	return
 }
 
-func createWriter(path string, tags ...string) (w writer, err error) {
+func createWriter(name string, path string, tags ...string) (w writer, err error) {
 	var file *os.File
 
 	if file, err = createWriteHeaderInclude(path, "", ".s", tags...); err == nil {
-		w = &asmWriter{f: file}
+		w = &asmWriter{name: name, f: file}
 	}
 
 	return
@@ -141,7 +135,7 @@ func (w *asmWriter) footer() (err error) {
 	err = w.flush()
 
 	if err == nil {
-		_, err = fmt.Fprintf(w.f, "GLOBL ·data(SB),RODATA,$%d\n", w.writeOffset)
+		_, err = fmt.Fprintf(w.f, "GLOBL ·%sData(SB),(NOPTR+RODATA),$%d\n", w.name, w.writeOffset)
 	}
 	return
 }
@@ -159,7 +153,7 @@ func (w *asmWriter) flush() (err error) {
 			sbuf = strconv.AppendUint(sbuf, uint64(w.buf[i]), 16)
 		}
 
-		_, err = fmt.Fprintf(w.f, "DATA ·data+%d(SB)/%d,$\"%s\"\n", w.writeOffset, w.index, sbuf)
+		_, err = fmt.Fprintf(w.f, "DATA ·%sData+%d(SB)/%d,$\"%s\"\n", w.name, w.writeOffset, w.index, sbuf)
 		w.writeOffset += int64(w.index)
 		w.index = 0
 	}
@@ -167,12 +161,12 @@ func (w *asmWriter) flush() (err error) {
 	return
 }
 
-func createGoWriter(file *os.File) (w writer, err error) {
-	w = &goWriter{f: file}
+func createGoWriter(name string, file *os.File) (w writer, err error) {
+	w = &goWriter{name: name, f: file}
 
-	_, err = fmt.Fprint(file, `
-func dataBytes() []byte {
-	str := dataString()
+	_, err = fmt.Fprintf(file, `
+func %sBytes() []byte {
+	str := %sData
 	hdr := *(*reflect.StringHeader)(unsafe.Pointer(&str))
 	return *(*[]byte)(unsafe.Pointer(&reflect.SliceHeader{
 		Data: hdr.Data,
@@ -181,12 +175,8 @@ func dataBytes() []byte {
 	}))
 }
 
-func dataString() string {
-	return data
-}
-
 const (
-	data = `)
+	%sData = `, name, name, name)
 
 	return
 }
@@ -253,158 +243,4 @@ func (w *goWriter) flush() (err error) {
 	}
 
 	return
-}
-
-func (list asmFiles) output(path string, buildTags string) (err error) {
-	var (
-		file *os.File
-	)
-
-	for _, entry := range list {
-		if err == nil {
-			file, err = createWriteHeaderInclude(path, entry.name, ".s", buildTags, entry.buildTags)
-		}
-
-		if err == nil {
-			_, err = file.WriteString(entry.code)
-		}
-
-		if file != nil {
-			file.Close()
-			file = nil
-		}
-	}
-
-	return
-}
-
-var assmemblerFiles = asmFiles{
-	{"_386", "", `
-TEXT ·file_bytes(SB),NOSPLIT,$0-4
-	LEAL	·data(SB), AX
-	MOVL	AX, ret+4(FP)
-	MOVL	len+0(FP), AX
-	MOVL	AX, ret+8(FP)
-	MOVL	AX, ret+12(FP)
-	RET
-
-TEXT ·file_string(SB),NOSPLIT,$0-4
-	LEAL	·data(SB), AX
-	MOVL	AX, ret+4(FP)
-	MOVL	len+0(FP), AX
-	MOVL	AX, ret+8(FP)
-	RET
-`},
-	{"_amd64", "", `
-TEXT ·file_bytes(SB),NOSPLIT,$0-4
-	LEAQ	·data(SB), AX
-	MOVQ	AX, ret+8(FP)
-	MOVL	len+0(FP), AX
-	MOVLQSX	AX, AX
-	MOVQ	AX, ret+16(FP)
-	MOVQ	AX, ret+24(FP)
-	RET
-
-TEXT ·file_string(SB),NOSPLIT,$0-4
-	LEAQ	·data(SB), AX
-	MOVQ	AX, ret+8(FP)
-	MOVL	len+0(FP), AX
-	MOVLQSX	AX, AX
-	MOVQ	AX, ret+16(FP)
-	RET
-`},
-	{"_arm", "", `
-TEXT ·file_bytes(SB),NOSPLIT,$0-4
-	MOVW	$·data(SB), R0
-	MOVW	R0, ret+4(FP)
-	MOVW	len+0(FP), R0
-	MOVW	R0, ret+8(FP)
-	MOVW	R0, ret+12(FP)
-	RET
-
-TEXT ·file_string(SB),NOSPLIT,$0-4
-	MOVW	$·data(SB), R0
-	MOVW	R0, ret+4(FP)
-	MOVW	len+0(FP), R0
-	MOVW	R0, ret+8(FP)
-	RET
-`},
-	{"_arm64", "", `
-TEXT ·file_bytes(SB),NOSPLIT,$0-8
-	MOVD	$·data(SB), R0
-	MOVD	R0, ret+8(FP)
-	MOVW	len+0(FP), R0
-	MOVD	R0, ret+16(FP)
-	MOVD	R0, ret+24(FP)
-	RET
-
-TEXT ·file_string(SB),NOSPLIT,$0-8
-	MOVD	$·data(SB), R0
-	MOVD	R0, ret+8(FP)
-	MOVD	len+0(FP), R0
-	MOVD	R0, ret+16(FP)
-	RET
-`},
-	{"_mipsx", "mips mipsle", `
-TEXT ·file_bytes(SB),NOSPLIT,$0-4
-	MOVW	$·data(SB), R1
-	MOVW	R1, ret+4(FP)
-	MOVW	len+0(FP), R1
-	MOVW	R1, ret+8(FP)
-	MOVW	R1, ret+12(FP)
-	JMP	(R31)
-
-TEXT ·file_string(SB),NOSPLIT,$0-4
-	MOVW	$·data(SB), R1
-	MOVW	R1, ret+4(FP)
-	MOVW	len+0(FP), R1
-	MOVW	R1, ret+8(FP)
-	JMP	(R31)
-`},
-	{"_mips64x", "mips64 mips64le", `
-TEXT ·file_bytes(SB),NOSPLIT,$0-8
-	MOVV	$·data(SB), R1
-	MOVV	R1, ret+8(FP)
-	MOVV	len+0(FP), R1
-	MOVV	R1, ret+16(FP)
-	MOVV	R1, ret+24(FP)
-	JMP	(R31)
-
-TEXT ·file_string(SB),NOSPLIT,$0-8
-	MOVV	$·data(SB), R1
-	MOVV	R1, ret+8(FP)
-	MOVV	len+0(FP), R1
-	MOVV	R1, ret+16(FP)
-	JMP	(R31)
-`},
-	{"_ppc64", "", `
-TEXT ·file_bytes(SB),NOSPLIT,$0-8
-	MOVD	$·data(SB), R3
-	MOVD	R3, ret+8(FP)
-	MOVD	len+0(FP), R3
-	MOVD	R3, ret+16(FP)
-	MOVD	R3, ret+24(FP)
-	RET
-
-TEXT ·file_string(SB),NOSPLIT,$0-8
-	MOVD	$·data(SB), R3
-	MOVD	R3, ret+8(FP)
-	MOVD	len+0(FP), R3
-	MOVD	R3, ret+16(FP)
-	RET
-`},
-	{"_s390x", "", `
-TEXT ·file_bytes(SB),NOSPLIT|NOFRAME,$0-8
-	MOVD	$·data(SB), R0
-	MOVW	len+0(FP), R1
-	MOVD	R1, R2
-	STMG	R0, R2, ret+8(FP)
-	JMP	R14
-
-TEXT ·file_string(SB),NOSPLIT|NOFRAME,$0-8
-	MOVD	$·data(SB), R0
-	MOVW	len+0(FP), R1
-	STMG	R0, R1, ret+8(FP)
-	JMP	R14
-`},
 }
