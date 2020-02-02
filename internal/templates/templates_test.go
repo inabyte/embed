@@ -3,25 +3,20 @@
 package templates
 
 import (
+	"bytes"
 	"crypto/sha1"
 	"encoding/base64"
 	"github.com/inabyte/embed/embedded"
-	"os"
+	"io"
+	"strings"
 	"testing"
 )
 
-func TestFileServer(t *testing.T) {
-	if FileHandler() == nil {
-		t.Errorf("Call to FileServer did no return a handler")
-	}
-}
-
 func TestBytes(t *testing.T) {
-	FS.Walk("/", func(path string, info os.FileInfo, err error) error {
+	FS.Walk("/", func(path string, info embedded.FileInfo, err error) error {
 		if !info.IsDir() {
-			linfo := info.(embedded.FileInfo)
-			if getTag(linfo.Bytes()) != linfo.Tag() {
-				t.Errorf("checksum for file %s doesn't match recorded", path)
+			if tag := getTag(bytes.NewReader(info.Bytes())); tag != info.Tag() {
+				t.Errorf("checksum {%s} for file %s doesn't match recorded {%s}", tag, path, info.Tag())
 			}
 		}
 		return nil
@@ -29,19 +24,37 @@ func TestBytes(t *testing.T) {
 }
 
 func TestString(t *testing.T) {
-	FS.Walk("/", func(path string, info os.FileInfo, err error) error {
+	FS.Walk("/", func(path string, info embedded.FileInfo, err error) error {
 		if !info.IsDir() {
-			linfo := info.(embedded.FileInfo)
-			s := linfo.String()
-			if getTag([]byte(s)) != linfo.Tag() {
-				t.Errorf("checksum for file %s doesn't match recorded {%s}", path, s)
+			s := info.String()
+			if tag := getTag(strings.NewReader(s)); tag != info.Tag() {
+				t.Errorf("checksum {%s} for file %s doesn't match recorded {%s}", tag, path, info.Tag())
 			}
 		}
 		return nil
 	})
 }
 
-func getTag(data []byte) string {
-	hash := sha1.Sum(data)
+func TestOpen(t *testing.T) {
+	FS.Walk("/", func(path string, info embedded.FileInfo, err error) error {
+		if !info.IsDir() {
+			f, err := FS.Open(path)
+			if err != nil {
+				t.Errorf("Open file %s return error %v", path, err)
+			} else {
+				defer f.Close()
+			}
+			if tag := getTag(f); tag != info.Tag() {
+				t.Errorf("checksum {%s} for file %s doesn't match recorded {%s}", tag, path, info.Tag())
+			}
+		}
+		return nil
+	})
+}
+
+func getTag(r io.Reader) string {
+	h := sha1.New()
+	io.Copy(h, r)
+	hash := h.Sum(nil)
 	return base64.RawURLEncoding.EncodeToString(hash[:]) + "-gz"
 }

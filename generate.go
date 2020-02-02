@@ -21,6 +21,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/inabyte/embed/embedded"
 	"github.com/inabyte/embed/internal/templates"
 )
 
@@ -52,6 +53,8 @@ type Config struct {
 	Local bool
 	// Go, if true, creates only go files.
 	Go bool
+	// FileServer, if true, add http.Handler to serve files.
+	FileServer bool
 	// BuildTags, if set, adds a build tags entry to file.
 	BuildTags string
 	// Files is the list of files or directories to embed.
@@ -86,6 +89,7 @@ func (config *Config) Generate() (err error) {
 
 		if err == nil {
 			config.Local = true
+			config.FileServer = true
 			config.DisableCompression = false
 			config.Package = "main"
 
@@ -122,11 +126,13 @@ var (
 type generate struct {
 	Remote      bool
 	PackageName string
+	Name        string
 	BuildTags   string
 	Imports     []string
 	TestImports []string
 	Main        bool
 	Go          bool
+	FileServer  bool
 	Files       []*file
 	Dirs        []*dir
 	ignore      *regexp.Regexp
@@ -149,6 +155,7 @@ func (gen *generate) init(config *Config) (err error) {
 	gen.config = config
 
 	gen.Main = config.Binary
+	gen.FileServer = config.FileServer
 
 	gen.Go = config.Go
 
@@ -168,6 +175,8 @@ func (gen *generate) init(config *Config) (err error) {
 
 		gen.PackageName = pkg
 	}
+
+	gen.Name = filepath.Base(config.Output)
 
 	gen.Files = make([]*file, 0, 10)
 	gen.Dirs = make([]*dir, 0, 10)
@@ -190,8 +199,15 @@ func (gen *generate) init(config *Config) (err error) {
 		gen.include, err = regexp.Compile(config.Include)
 	}
 
-	gen.imports = make(map[string]bool)
-	gen.testImports = map[string]bool{"crypto/sha1": true, "encoding/base64": true, "os": true, "testing": true}
+	gen.imports = map[string]bool{"unsafe": true}
+	gen.testImports = map[string]bool{
+		"bytes":           true,
+		"crypto/sha1":     true,
+		"encoding/base64": true,
+		"io":              true,
+		"strings":         true,
+		"testing":         true,
+	}
 
 	if gen.Main {
 		gen.imports["flag"] = true
@@ -201,7 +217,6 @@ func (gen *generate) init(config *Config) (err error) {
 
 	if gen.Go {
 		gen.imports["reflect"] = true
-		gen.imports["unsafe"] = true
 	}
 
 	if gen.Remote {
@@ -361,9 +376,9 @@ func (gen *generate) writeData(file *os.File) (err error) {
 	var writer writer
 
 	if gen.Go {
-		writer, err = createGoWriter(file)
+		writer, err = createGoWriter(gen.Name, file)
 	} else {
-		writer, err = createWriter(gen.config.Output, gen.config.BuildTags)
+		writer, err = createWriter(gen.Name, gen.config.Output, gen.config.BuildTags)
 	}
 
 	if err == nil {
@@ -400,7 +415,7 @@ func (gen *generate) writeGoFiles() (err error) {
 		err = tmpl.Execute(file, gen)
 	}
 
-	if err == nil && gen.config.Local && gen.Go {
+	if err == nil && gen.config.Local {
 		gen.appendFiles(file, false)
 	}
 
@@ -421,7 +436,7 @@ func (gen *generate) writeGoFiles() (err error) {
 		err = testTmpl.Execute(file, gen)
 	}
 
-	if err == nil && gen.config.Local && gen.Go {
+	if err == nil && gen.config.Local {
 		gen.appendFiles(file, true)
 	}
 
@@ -430,41 +445,40 @@ func (gen *generate) writeGoFiles() (err error) {
 		file = nil
 	}
 
-	if gen.config.Local && !gen.Go {
-		gen.createFiles()
-	}
-
 	return
 }
 
 func (gen *generate) appendFiles(out *os.File, tests bool) {
-	templates.FS.Walk("/", func(path string, info os.FileInfo, err error) error {
+	templates.FS.Walk("/", func(path string, info embedded.FileInfo, err error) error {
 
 		if !info.IsDir() {
 			var (
 				s string
 			)
 
-			file, err := templates.FS.Open(path)
+			if gen.FileServer || !strings.HasPrefix(filepath.Base(path), "server") {
 
-			if err == nil {
-				defer file.Close()
-				read := bufio.NewReader(file)
-
-				for s, err = read.ReadString('\n'); err == nil && !strings.HasPrefix(s, "import"); s, err = read.ReadString('\n') {
-				}
-
-				for s, err = read.ReadString('\n'); err == nil && !strings.HasPrefix(s, ")"); s, err = read.ReadString('\n') {
-				}
+				file, err := templates.FS.Open(path)
 
 				if err == nil {
-					if strings.HasSuffix(info.Name(), "_test.go") {
-						if tests {
-							_, err = io.Copy(out, read)
-						}
-					} else {
-						if !tests {
-							_, err = io.Copy(out, read)
+					defer file.Close()
+					read := bufio.NewReader(file)
+
+					for s, err = read.ReadString('\n'); err == nil && !strings.HasPrefix(s, "import"); s, err = read.ReadString('\n') {
+					}
+
+					for s, err = read.ReadString('\n'); err == nil && !strings.HasPrefix(s, ")"); s, err = read.ReadString('\n') {
+					}
+
+					if err == nil {
+						if strings.HasSuffix(info.Name(), "_test.go") {
+							if tests {
+								_, err = io.Copy(out, read)
+							}
+						} else {
+							if !tests {
+								_, err = io.Copy(out, read)
+							}
 						}
 					}
 				}
@@ -476,67 +490,33 @@ func (gen *generate) appendFiles(out *os.File, tests bool) {
 	})
 }
 
-func (gen *generate) createFiles() {
-	templates.FS.Walk("/", func(path string, info os.FileInfo, err error) error {
-
-		if !info.IsDir() {
-			var (
-				s   string
-				out *os.File
-			)
-
-			file, err := templates.FS.Open(path)
-
-			if err == nil {
-				defer file.Close()
-				read := bufio.NewReader(file)
-
-				for s, err = read.ReadString('\n'); err == nil && !strings.HasPrefix(s, "package"); s, err = read.ReadString('\n') {
-				}
-
-				if err == nil {
-					out, err = createWriteHeader(gen.config.Output, "_"+info.Name(), "")
-				}
-
-				if err == nil {
-					_, err = fmt.Fprintf(out, "\n\npackage %s\n", gen.PackageName)
-				}
-
-				if err == nil {
-					_, err = io.Copy(out, read)
-				}
-			}
-			return err
-		}
-
-		return nil
-	})
-}
-
 func (gen *generate) scanImports() {
-	templates.FS.Walk("/", func(path string, info os.FileInfo, err error) error {
+	templates.FS.Walk("/", func(path string, info embedded.FileInfo, err error) error {
 
 		if !info.IsDir() {
 			var (
 				s string
 			)
 
-			file, err := templates.FS.Open(path)
+			if gen.FileServer || !strings.HasPrefix(filepath.Base(path), "server") {
 
-			if err == nil {
-				defer file.Close()
-				read := bufio.NewReader(file)
+				file, err := templates.FS.Open(path)
 
-				for s, err = read.ReadString('\n'); err == nil && !strings.HasPrefix(s, "import"); s, err = read.ReadString('\n') {
-				}
+				if err == nil {
+					defer file.Close()
+					read := bufio.NewReader(file)
 
-				for s, err = read.ReadString('\n'); err == nil && !strings.HasPrefix(s, ")"); s, err = read.ReadString('\n') {
-					s = strings.TrimSpace(s)
-					s = s[1 : len(s)-1] // Remove double quotes
-					if strings.HasSuffix(info.Name(), "_test.go") {
-						gen.testImports[s] = true
-					} else {
-						gen.imports[s] = true
+					for s, err = read.ReadString('\n'); err == nil && !strings.HasPrefix(s, "import"); s, err = read.ReadString('\n') {
+					}
+
+					for s, err = read.ReadString('\n'); err == nil && !strings.HasPrefix(s, ")"); s, err = read.ReadString('\n') {
+						s = strings.TrimSpace(s)
+						s = s[1 : len(s)-1] // Remove double quotes
+						if strings.HasSuffix(info.Name(), "_test.go") {
+							gen.testImports[s] = true
+						} else {
+							gen.imports[s] = true
+						}
 					}
 				}
 			}
@@ -619,7 +599,7 @@ func (gen *generate) generate(config *Config) error {
 
 	if err == nil {
 
-		if gen.Go && gen.config.Local {
+		if gen.config.Local {
 			gen.scanImports()
 		}
 
@@ -663,10 +643,6 @@ func (gen *generate) generate(config *Config) error {
 		err = gen.writeGoFiles()
 	}
 
-	if err == nil && !gen.Go {
-		err = assmemblerFiles.output(gen.config.Output, config.BuildTags)
-	}
-
 	return err
 }
 
@@ -682,21 +658,21 @@ import ({{ range .Imports }}
 
 // FS return file system
 var FS {{ if .Remote }}embedded.{{ end }}FileSystem
-
+{{ if .FileServer }}
 // FileHandler return http file server implements http.Handler
 func FileHandler() {{ if .Remote }}embedded.{{ end }}Handler {
 	return {{ if .Remote }}embedded.{{ end }}GetFileServer(FS)
 }
+{{end}}
+{{ if not .Go }}var {{ .Name }}Data [{{ .Offset }}]byte
 
-{{ if not .Go }}func file_bytes(uint32) []byte
-func file_string(uint32) string
 {{ end }}func init() {
 {{ if .Go }}
-	bytes := dataBytes()
-	str := dataString()
+	bytes := {{ .Name }}Bytes()
+	str := {{ .Name }}Data
 {{ else }}
-	bytes := file_bytes({{ .Offset }})
-	str := file_string({{ .Offset }})
+	bytes := {{ .Name }}Data[:]
+	str := *(*string)(unsafe.Pointer(&bytes))
 {{ end}}
 	FS = {{ if .Remote }}embedded.{{ end }}New()
 {{ range .Files }}
@@ -741,7 +717,7 @@ func main() {
 	flag.Parse()
 
 	if show {
-		FS.Walk("/", func(path string, info os.FileInfo, err error) error {
+		FS.Walk("/", func(path string, info FileInfo, err error) error {
 			if !info.IsDir() {
 				os.Stdout.WriteString(path)
 				os.Stdout.WriteString("\n")
@@ -786,19 +762,18 @@ package {{.PackageName}}
 import ({{ range .TestImports }}
 	"{{.}}"{{ end }}
 ){{ end }}
-
+{{ if .FileServer }}
 func TestFileServer(t *testing.T) {
 	if FileHandler() == nil {
 		t.Errorf("Call to FileServer did no return a handler")
 	}
 }
-
+{{ end}}
 func TestBytes(t *testing.T) {
-	FS.Walk("/", func(path string, info os.FileInfo, err error) error {
+	FS.Walk("/", func(path string, info {{ if .Remote }}embedded.{{ end }}FileInfo, err error) error {
 		if !info.IsDir() {
-			linfo := info.({{ if .Remote }}embedded.{{ end }}FileInfo)
-			if getTag(linfo.Bytes()) != linfo.Tag() {
-				t.Errorf("checksum for file %s doesn't match recorded", path)
+			if tag := getTag(bytes.NewReader(info.Bytes())); tag != info.Tag() {
+				t.Errorf("checksum {%s} for file %s doesn't match recorded {%s}", tag, path, info.Tag())
 			}
 		}
 		return nil
@@ -806,20 +781,38 @@ func TestBytes(t *testing.T) {
 }
 
 func TestString(t *testing.T) {
-	FS.Walk("/", func(path string, info os.FileInfo, err error) error {
+	FS.Walk("/", func(path string, info {{ if .Remote }}embedded.{{ end }}FileInfo, err error) error {
 		if !info.IsDir() {
-			linfo := info.({{ if .Remote }}embedded.{{ end }}FileInfo)
-			s := linfo.String()
-			if getTag([]byte(s)) != linfo.Tag() {
-				t.Errorf("checksum for file %s doesn't match recorded {%s}", path, s)
+			s := info.String()
+			if tag := getTag(strings.NewReader(s)); tag != info.Tag() {
+				t.Errorf("checksum {%s} for file %s doesn't match recorded {%s}", tag, path, info.Tag())
 			}
 		}
 		return nil
 	})
 }
 
-func getTag(data []byte) string {
-	hash := sha1.Sum(data)
+func TestOpen(t *testing.T) {
+	FS.Walk("/", func(path string, info {{ if .Remote }}embedded.{{ end }}FileInfo, err error) error {
+		if !info.IsDir() {
+			f, err := FS.Open(path)
+			if err != nil {
+				t.Errorf("Open file %s return error %v", path, err)
+			} else {
+				defer f.Close()
+			}
+			if tag := getTag(f); tag != info.Tag() {
+				t.Errorf("checksum {%s} for file %s doesn't match recorded {%s}", tag, path, info.Tag())
+			}
+		}
+		return nil
+	})
+}
+
+func getTag(r io.Reader) string {
+	h := sha1.New()
+	io.Copy(h, r)
+	hash := h.Sum(nil)
 	return base64.RawURLEncoding.EncodeToString(hash[:]) + "-gz"
 }
 `

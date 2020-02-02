@@ -50,7 +50,7 @@ func TestWalk(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var list []string
-			f.Walk(test.file, func(path string, info os.FileInfo, err error) error {
+			f.Walk(test.file, func(path string, info FileInfo, err error) error {
 				list = append(list, path)
 				return test.err
 			})
