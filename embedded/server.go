@@ -168,17 +168,25 @@ func localRedirect(w http.ResponseWriter, r *http.Request, newPath string) {
 // serve set various headers etag, content type
 func (f *reader) serve(w http.ResponseWriter, r *http.Request) {
 	tag := f.tag
+
 	// Check is requesting compressed and we have it compressed
 	if f.compressed && strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 		w.Header().Set("Content-Encoding", "gzip")
 		f.readCompressed = true
 		f.length = int64(len(f.data))
 	} else {
-		tag = tag[:len(tag)-3]
+		if len(tag) > 3 {
+			tag = tag[:len(tag)-3]
+		}
 	}
 
-	w.Header().Set("Content-Type", f.mimeType)
-	w.Header().Set("Etag", strconv.Quote(tag))
+	if len(f.mimeType) > 0 {
+		w.Header().Set("Content-Type", f.mimeType)
+	}
+
+	if len(tag) > 0 {
+		w.Header().Set("Etag", strconv.Quote(tag))
+	}
 
 	// ServeContent will check modification time
 	http.ServeContent(w, r, f.Name(), f.ModTime(), f)

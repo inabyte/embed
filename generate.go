@@ -143,10 +143,15 @@ type generate struct {
 	modifyTime  *int64
 	prefix      string
 	compress    bool
-	Offset      int64
+	Offset      int
 	processed   map[string]bool
 	config      *Config
 	last        time.Time
+}
+
+// Count return count of files and directories
+func (gen *generate) Count() int {
+	return len(gen.Files) + len(gen.Dirs)
 }
 
 func (gen *generate) init(config *Config) (err error) {
@@ -269,7 +274,7 @@ func (gen *generate) canonicalName(fname string) string {
 	return path.Join("/", strings.TrimPrefix(fpath, gen.prefix))
 }
 
-func (gen *generate) process(fpath string, f *os.File, fi os.FileInfo) (skip bool, err error) {
+func (gen *generate) scan(fpath string, f *os.File, fi os.FileInfo) (skip bool, err error) {
 	n := gen.canonicalName(fpath)
 	err = gen.checkProcessed(n, fpath)
 
@@ -286,37 +291,33 @@ func (gen *generate) process(fpath string, f *os.File, fi os.FileInfo) (skip boo
 			fis, err = f.Readdir(0)
 
 			if err == nil {
-				files := make(map[string]bool, len(fis))
-				gen.Dirs = append(gen.Dirs, &dir{
+				d := &dir{
 					name:     n,
 					baseName: path.Base(n),
 					local:    fpath,
 					ModTime:  gen.getModTime(fi.ModTime()),
-					files:    files,
-				})
+					files:    make(map[string]bool, len(fis)),
+				}
+				gen.Dirs = append(gen.Dirs, d)
 				for _, fi := range fis {
 					if err == nil {
 						name := filepath.Join(fpath, fi.Name())
 						if sub, err = os.Open(name); err == nil {
-							if skipped, err = gen.process(name, sub, fi); err == nil && !skipped {
-								files[gen.canonicalName(name)] = true
+							if skipped, err = gen.scan(name, sub, fi); err == nil && !skipped {
+								d.files[gen.canonicalName(name)] = true
 							}
 							sub.Close()
 						}
 					}
 				}
+				d.set()
 			}
 		} else {
 			if skip = gen.skip(fpath); !skip {
-				var b []byte
-
-				b, err = ioutil.ReadAll(f)
-
 				if err == nil {
 					gen.Files = append(gen.Files, &file{
 						name:     n,
 						baseName: path.Base(n),
-						data:     b,
 						local:    fpath,
 						ModTime:  gen.getModTime(fi.ModTime()),
 					})
@@ -328,85 +329,30 @@ func (gen *generate) process(fpath string, f *os.File, fi os.FileInfo) (skip boo
 	return
 }
 
-func (gen *generate) processFiles() (err error) {
+func (gen *generate) writeData(file *os.File) error {
 
-	var offset int64
-
-	for _, entry := range gen.Files {
-
-		if err == nil {
-			entry.setMimeType()
-
-			if gen.minify[entry.mimeType] {
-				entry.minify()
-			}
-
-			entry.fill()
-			entry.set()
-
-			if gen.compress {
-				err = entry.compress()
-			}
-		}
-	}
+	writer, err := createWriter(gen.Go, gen.PackageName, gen.Name, gen.config.Output, gen.config.BuildTags)
 
 	if err == nil {
-		for _, entry := range gen.Dirs {
-			entry.set()
-		}
-
-		stringer.process()
-	}
-
-	stringer.offset = int(offset)
-	offset += stringer.len()
-
-	for _, entry := range gen.Files {
-		entry.Offset = offset
-		offset += int64(len(entry.data))
-	}
-
-	gen.Offset = offset
-
-	return
-}
-
-func (gen *generate) writeData(file *os.File) (err error) {
-
-	var writer writer
-
-	if gen.Go {
-		writer, err = createGoWriter(gen.Name, file)
-	} else {
-		writer, err = createWriter(gen.Name, gen.config.Output, gen.config.BuildTags)
-	}
-
-	if err == nil {
-		if !gen.Go {
-			defer writer.Close()
-		}
-
-		if err == nil {
-			_, err = writer.Write(stringer.bytes())
-		}
+		defer writer.Close()
 
 		for _, entry := range gen.Files {
 			if err == nil {
-				if err == nil {
-					_, err = writer.Write(entry.data)
-				}
+				err = entry.write(writer)
 			}
 		}
-
-		if err == nil {
-			writer.footer()
-		}
 	}
+
+	if err == nil {
+		err = stringer.write(writer)
+	}
+
+	gen.Offset = writer.offset()
 
 	return err
 }
 
-func (gen *generate) writeGoFiles() (err error) {
+func (gen *generate) writeFiles() (err error) {
 	var file *os.File
 
 	file, err = createFile(gen.config.Output, "", ".go")
@@ -417,10 +363,6 @@ func (gen *generate) writeGoFiles() (err error) {
 
 	if err == nil && gen.config.Local {
 		gen.appendFiles(file, false)
-	}
-
-	if err == nil && gen.Go {
-		err = gen.writeData(file)
 	}
 
 	if file != nil {
@@ -586,7 +528,7 @@ func (gen *generate) generate(config *Config) error {
 
 			if f, err = os.Open(fpath); err == nil {
 				if fi, err = f.Stat(); err == nil {
-					_, err = gen.process(fpath, f, fi)
+					_, err = gen.scan(fpath, f, fi)
 				}
 				f.Close()
 			}
@@ -632,15 +574,11 @@ func (gen *generate) generate(config *Config) error {
 	}
 
 	if err == nil {
-		err = gen.processFiles()
-	}
-
-	if err == nil && !gen.Go {
 		err = gen.writeData(nil)
 	}
 
 	if err == nil {
-		err = gen.writeGoFiles()
+		err = gen.writeFiles()
 	}
 
 	return err
@@ -668,13 +606,18 @@ func FileHandler() {{ if .Remote }}embedded.{{ end }}Handler {
 
 {{ end }}func init() {
 {{ if .Go }}
-	bytes := {{ .Name }}Bytes()
 	str := {{ .Name }}Data
+	hdr := *(*reflect.StringHeader)(unsafe.Pointer(&str))
+	bytes := *(*[]byte)(unsafe.Pointer(&reflect.SliceHeader{
+		Data: hdr.Data,
+		Len:  hdr.Len,
+		Cap:  hdr.Len,
+	}))
 {{ else }}
 	bytes := {{ .Name }}Data[:]
 	str := *(*string)(unsafe.Pointer(&bytes))
 {{ end}}
-	FS = {{ if .Remote }}embedded.{{ end }}New()
+	FS = {{ if .Remote }}embedded.{{ end }}New({{ .Count  }})
 {{ range .Files }}
 	FS.AddFile( {{ .Name }},
 		{{ .BaseName }},
@@ -772,9 +715,11 @@ func TestFileServer(t *testing.T) {
 func TestBytes(t *testing.T) {
 	FS.Walk("/", func(path string, info {{ if .Remote }}embedded.{{ end }}FileInfo, err error) error {
 		if !info.IsDir() {
-			if tag := getTag(bytes.NewReader(info.Bytes())); tag != info.Tag() {
-				t.Errorf("checksum {%s} for file %s doesn't match recorded {%s}", tag, path, info.Tag())
-			}
+			t.Run(path[1:], func(t *testing.T) {
+				if tag := getTag(bytes.NewReader(info.Bytes())); tag != info.Tag() {
+					t.Errorf("checksum {%s} for file %s doesn't match recorded {%s}", tag, path, info.Tag())
+				}
+			})
 		}
 		return nil
 	})
@@ -783,10 +728,12 @@ func TestBytes(t *testing.T) {
 func TestString(t *testing.T) {
 	FS.Walk("/", func(path string, info {{ if .Remote }}embedded.{{ end }}FileInfo, err error) error {
 		if !info.IsDir() {
-			s := info.String()
-			if tag := getTag(strings.NewReader(s)); tag != info.Tag() {
-				t.Errorf("checksum {%s} for file %s doesn't match recorded {%s}", tag, path, info.Tag())
-			}
+			t.Run(path[1:], func(t *testing.T) {
+				s := info.String()
+				if tag := getTag(strings.NewReader(s)); tag != info.Tag() {
+					t.Errorf("checksum {%s} for file %s doesn't match recorded {%s}", tag, path, info.Tag())
+				}
+			})
 		}
 		return nil
 	})
@@ -795,15 +742,17 @@ func TestString(t *testing.T) {
 func TestOpen(t *testing.T) {
 	FS.Walk("/", func(path string, info {{ if .Remote }}embedded.{{ end }}FileInfo, err error) error {
 		if !info.IsDir() {
-			f, err := FS.Open(path)
-			if err != nil {
-				t.Errorf("Open file %s return error %v", path, err)
-			} else {
-				defer f.Close()
-			}
-			if tag := getTag(f); tag != info.Tag() {
-				t.Errorf("checksum {%s} for file %s doesn't match recorded {%s}", tag, path, info.Tag())
-			}
+			t.Run(path[1:], func(t *testing.T) {
+				f, err := FS.Open(path)
+				if err != nil {
+					t.Errorf("Open file %s return error %v", path, err)
+				} else {
+					defer f.Close()
+				}
+				if tag := getTag(f); tag != info.Tag() {
+					t.Errorf("checksum {%s} for file %s doesn't match recorded {%s}", tag, path, info.Tag())
+				}
+			})
 		}
 		return nil
 	})

@@ -8,6 +8,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
+	"io/ioutil"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -27,32 +29,58 @@ Some text to make this compressable Some text to make this compressable Some tex
 )
 
 func TestFile(t *testing.T) {
+	base, err := ioutil.TempDir("", "file-test")
+
+	w := mocWriter{}
+
 	f := file{
-		name:     "/scripts/index",
-		baseName: "index",
-		local:    "embed/scripts/index",
+		name:     "/scripts/test.html",
+		baseName: "test.html",
+		local:    "test.html",
 		ModTime:  1579282495,
-		data:     []byte(rawContents),
 	}
 
-	f.fill()
-	f.setMimeType()
-	f.minify()
-	f.compress()
+	if err == nil {
+		var curdir string
 
-	f.set()
+		defer os.RemoveAll(base)
+		curdir, err = os.Getwd()
+		if err == nil {
+			defer os.Chdir(curdir)
+			err = os.Chdir(base)
+		}
+	}
 
-	stringer.process()
+	if err == nil {
+		err = ioutil.WriteFile(f.local, []byte(rawContents), os.ModePerm)
+	}
 
-	fileTests{
-		{"Name", "/* /scripts/index */ str[59:73]"},
-		{"BaseName", "/* index */ str[68:73]"},
-		{"Local", "/* embed/scripts/index */ str[54:73]"},
-		{"MimeType", "/* text/html; charset=utf-8 */ str[30:54]"},
-		{"Tag", "/* J1A-DFNtnAw81oBuVFV4VjPNReo-gz */ str[0:30]"},
-		{"Slice", "0:98"},
-		{"Data", compress(minifyContents)},
-	}.run(t, &f)
+	if err == nil {
+		err = f.write(&w)
+	}
+
+	if err == nil {
+		err = stringer.write(&mocWriter{})
+	}
+
+	t.Run("Contents", func(t *testing.T) {
+		if !reflect.DeepEqual(w.bytes, compress(minifyContents)) {
+			t.Errorf("Did not get expected for %s got (%s) expected(%s)", "Contents", unCompress(w.bytes), minifyContents)
+		}
+	})
+
+	if err == nil {
+		fileTests{
+			{"Name", "/* /scripts/test.html */ str[54:72]"},
+			{"BaseName", "/* test.html */ str[63:72]"},
+			{"Local", "/* test.html */ str[63:72]"},
+			{"MimeType", "/* text/html; charset=utf-8 */ str[30:54]"},
+			{"Tag", "/* xwI1ooNerSnDfL_w9IZZoVz_A4Y-gz */ str[0:30]"},
+			{"Slice", "0:98"},
+		}.run(t, &f)
+	} else {
+		t.Errorf("Error setting up test %v", err)
+	}
 }
 
 func TestDir(t *testing.T) {
@@ -66,14 +94,19 @@ func TestDir(t *testing.T) {
 
 	d.set()
 
-	stringer.process()
+	w := mocWriter{}
+	err := stringer.write(&w)
 
-	fileTests{
-		{"Name", "/* /scripts */ str[59:67]"},
-		{"BaseName", "/* scripts */ str[60:67]"},
-		{"Local", "/* embed/scripts */ str[54:67]"},
-		{"Files", []string{"/* /scripts/index.html */ str[73:92]"}},
-	}.run(t, &d)
+	if err == nil {
+		fileTests{
+			{"Name", "/* /scripts */ str[54:62]"},
+			{"BaseName", "/* scripts */ str[55:62]"},
+			{"Local", "/* embed/scripts */ str[91:104]"},
+			{"Files", []string{"/* /scripts/index.html */ str[54:73]"}},
+		}.run(t, &d)
+	} else {
+		t.Errorf("Error setting up test %v", err)
+	}
 }
 
 type fileTest struct {

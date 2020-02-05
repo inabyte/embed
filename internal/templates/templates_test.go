@@ -15,9 +15,11 @@ import (
 func TestBytes(t *testing.T) {
 	FS.Walk("/", func(path string, info embedded.FileInfo, err error) error {
 		if !info.IsDir() {
-			if tag := getTag(bytes.NewReader(info.Bytes())); tag != info.Tag() {
-				t.Errorf("checksum {%s} for file %s doesn't match recorded {%s}", tag, path, info.Tag())
-			}
+			t.Run(path[1:], func(t *testing.T) {
+				if tag := getTag(bytes.NewReader(info.Bytes())); tag != info.Tag() {
+					t.Errorf("checksum {%s} for file %s doesn't match recorded {%s}", tag, path, info.Tag())
+				}
+			})
 		}
 		return nil
 	})
@@ -26,10 +28,12 @@ func TestBytes(t *testing.T) {
 func TestString(t *testing.T) {
 	FS.Walk("/", func(path string, info embedded.FileInfo, err error) error {
 		if !info.IsDir() {
-			s := info.String()
-			if tag := getTag(strings.NewReader(s)); tag != info.Tag() {
-				t.Errorf("checksum {%s} for file %s doesn't match recorded {%s}", tag, path, info.Tag())
-			}
+			t.Run(path[1:], func(t *testing.T) {
+				s := info.String()
+				if tag := getTag(strings.NewReader(s)); tag != info.Tag() {
+					t.Errorf("checksum {%s} for file %s doesn't match recorded {%s}", tag, path, info.Tag())
+				}
+			})
 		}
 		return nil
 	})
@@ -38,15 +42,17 @@ func TestString(t *testing.T) {
 func TestOpen(t *testing.T) {
 	FS.Walk("/", func(path string, info embedded.FileInfo, err error) error {
 		if !info.IsDir() {
-			f, err := FS.Open(path)
-			if err != nil {
-				t.Errorf("Open file %s return error %v", path, err)
-			} else {
-				defer f.Close()
-			}
-			if tag := getTag(f); tag != info.Tag() {
-				t.Errorf("checksum {%s} for file %s doesn't match recorded {%s}", tag, path, info.Tag())
-			}
+			t.Run(path[1:], func(t *testing.T) {
+				f, err := FS.Open(path)
+				if err != nil {
+					t.Errorf("Open file %s return error %v", path, err)
+				} else {
+					defer f.Close()
+				}
+				if tag := getTag(f); tag != info.Tag() {
+					t.Errorf("checksum {%s} for file %s doesn't match recorded {%s}", tag, path, info.Tag())
+				}
+			})
 		}
 		return nil
 	})

@@ -15,8 +15,10 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
+	"unsafe"
 )
 
 // FileSystem defines the FileSystem interface and builder
@@ -36,6 +38,11 @@ type FileSystem interface {
 	AddFile(path string, name string, local string, size int64, modtime int64, mimeType string, tag string, compressed bool, data []byte, str string)
 	// AddFolder add a file to embedded filesystem
 	AddFolder(path string, name string, local string, modtime int64, paths ...string)
+
+	// WriteFile writes data to a file named by filename.
+	// If the file does not exist, WriteFile creates it with permissions perm;
+	// otherwise WriteFile truncates it before writing.
+	WriteFile(filename string, data []byte, perm os.FileMode) error
 
 	// UseLocal use on disk copy instead of embedded data (for development)
 	UseLocal(bool)
@@ -93,8 +100,8 @@ type files struct {
 }
 
 // New creates a new Files that loads embedded content.
-func New() FileSystem {
-	return &files{list: make(map[string]*file)}
+func New(count int) FileSystem {
+	return &files{list: make(map[string]*file, count)}
 }
 
 func (fs *files) Open(name string) (file http.File, err error) {
@@ -226,6 +233,71 @@ func (fs *files) AddFolder(path string, name string, local string, modtime int64
 		modtime:  modtime,
 		subFiles: subFiles,
 	}
+}
+
+func (fs *files) addToFolder(filename string) (err error) {
+	folder := path.Dir(filename)
+
+	if f, ok := fs.list[folder]; !ok {
+		fs.list[folder] = &file{
+			name:    path.Base(folder),
+			isDir:   true,
+			modtime: time.Now().Unix(),
+		}
+		err = fs.addToFolder(folder)
+		if err != nil {
+			delete(fs.list, folder)
+		}
+	} else {
+		if !f.isDir {
+			err = &os.PathError{Op: "mkdir", Path: folder, Err: os.ErrInvalid}
+		}
+	}
+
+	if err == nil {
+		f := fs.list[folder]
+		f.subFiles = append(f.subFiles, fs.list[filename])
+		if len(f.subFiles) > 1 {
+			sort.Slice(f.subFiles, func(i, j int) bool {
+				return strings.Compare(f.subFiles[i].Name(), f.subFiles[j].Name()) == -1
+			})
+		}
+	}
+
+	return
+}
+
+func (fs *files) WriteFile(filename string, data []byte, perm os.FileMode) (err error) {
+
+	// Make a copy of the byte data
+	local := make([]byte, len(data))
+	copy(local, data)
+	localStr := *(*string)(unsafe.Pointer(&local))
+
+	// If file exists just replace the data
+	if f, ok := fs.list[filename]; ok {
+		f.tag = ""
+		f.mimeType = ""
+		f.size = int64(len(local))
+		f.compressed = false
+		f.data = local
+		f.str = localStr
+	} else {
+		fs.list[filename] = &file{
+			name:    path.Base(filename),
+			size:    int64(len(local)),
+			modtime: time.Now().Unix(),
+			data:    local,
+			str:     localStr,
+		}
+
+		// Now add folder entries as required
+		if err = fs.addToFolder(filename); err != nil {
+			delete(fs.list, filename)
+		}
+	}
+
+	return
 }
 
 func (fs *files) UseLocal(value bool) {

@@ -34,6 +34,52 @@ var (
 	indexTag        = tag(indexBytes)
 )
 
+func TestWriteFile(t *testing.T) {
+	dir, f := makeFs()
+	defer os.RemoveAll(dir)
+
+	for _, test := range []struct {
+		name     string
+		file     string
+		hasError bool
+		data     []byte
+	}{
+		{"Replace", "/settings.html", false, []byte("some data")},
+		{"Add", "/images/picture.svg", false, []byte("some image data")},
+		{"Bad Path", "/settings.html/js/utils.js", true, []byte("some script data")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+
+			err := f.WriteFile(test.file, test.data, os.ModePerm)
+
+			if err == nil {
+				if test.hasError {
+					t.Errorf("Test %s did not error as expected", test.name)
+				}
+			} else {
+				if !test.hasError {
+					t.Errorf("Test %s returned unexpected error %v", test.name, err)
+				}
+			}
+
+			if !test.hasError {
+				if file, err := f.Open(test.file); err != nil {
+					t.Errorf("Test %s open file returned unexpected error %v", test.name, err)
+				} else {
+					if b, err := ioutil.ReadAll(file); err != nil {
+						t.Errorf("Test %s ReadAll returned unexpected error %v", test.name, err)
+					} else {
+						if !reflect.DeepEqual(b, test.data) {
+							t.Errorf("Did not get expected contents (%s) expect (%s)", b, test.data)
+						}
+					}
+				}
+
+			}
+		})
+	}
+}
+
 func TestWalk(t *testing.T) {
 	dir, f := makeFs()
 	defer os.RemoveAll(dir)
@@ -56,10 +102,11 @@ func TestWalk(t *testing.T) {
 			})
 
 			if !reflect.DeepEqual(list, test.expect) {
-				t.Errorf("Did not wlak file as expected got(%v) expect (%v)", list, test.expect)
+				t.Errorf("Did not Walk file as expected got(%v) expect (%v)", list, test.expect)
 			}
 		})
 	}
+
 }
 
 func TestFiles(t *testing.T) {
@@ -180,7 +227,7 @@ func TestFiles(t *testing.T) {
 func makeFs() (string, FileSystem) {
 	tmpdir, _ := ioutil.TempDir("", "fs-test")
 
-	f := New()
+	f := New(6)
 
 	f.AddFile("/index.html", "index.html",
 		filepath.Join(tmpdir, "index.html"),
