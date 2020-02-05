@@ -19,28 +19,18 @@ const (
 
 type writer interface {
 	io.WriteCloser
-	offset() int64
-	footer() error
+	offset() int
 }
 
-type asmWriter struct {
+type fileWriter struct {
 	name        string
+	isGo        bool
 	buf         [lineSize]byte
 	strBuf      [lineSize * 4]byte
 	index       int
 	f           *os.File
-	dataOffset  int64
-	writeOffset int64
-}
-
-type goWriter struct {
-	name        string
-	buf         [lineSize]byte
-	strBuf      [lineSize * 4]byte
-	index       int
-	f           *os.File
-	dataOffset  int64
-	writeOffset int64
+	dataOffset  int
+	writeOffset int
 }
 
 func createFile(path string, name string, extension string) (file *os.File, err error) {
@@ -58,89 +48,61 @@ func createFile(path string, name string, extension string) (file *os.File, err 
 	return
 }
 
-func createWriteHeader(path string, name string, extension string, tags ...string) (file *os.File, err error) {
+func createWriter(isGo bool, pkg string, name string, path string, tags ...string) (w writer, err error) {
+	var file *os.File
 
-	file, err = createFile(path, name, extension)
+	ext := ".s"
+	if isGo {
+		ext = ".go"
+	}
+
+	buildTags := strings.TrimSpace(strings.Join(tags, " "))
+	file, err = createFile(path, "_data", ext)
 
 	if err == nil {
 		_, err = file.WriteString(header)
-
-		if err == nil {
-			buildTags := strings.TrimSpace(strings.Join(tags, " "))
-			if len(buildTags) > 0 {
-				_, err = file.WriteString("\n// +build ")
-				if err == nil {
-					_, err = file.WriteString(buildTags)
-				}
-			}
-		}
 	}
 
-	return
-}
-
-func createWriteHeaderInclude(path string, name string, extension string, tags ...string) (file *os.File, err error) {
-
-	file, err = createWriteHeader(path, name, extension, tags...)
+	if err == nil && len(buildTags) > 0 {
+		_, err = file.WriteString("\n// +build " + buildTags)
+	}
 
 	if err == nil {
-		if err == nil {
+		if isGo {
+			_, err = fmt.Fprintf(file, "\n\npackage %s\n\nconst (\n\t%sData = ", pkg, name)
+		} else {
 			_, err = file.WriteString("\n\n#include \"textflag.h\"\n\n")
 		}
 	}
 
-	return
-}
-
-func createWriter(name string, path string, tags ...string) (w writer, err error) {
-	var file *os.File
-
-	if file, err = createWriteHeaderInclude(path, "", ".s", tags...); err == nil {
-		w = &asmWriter{name: name, f: file}
+	if err == nil {
+		w = &fileWriter{name: name, isGo: isGo, f: file}
 	}
 
 	return
 }
 
-func (w *asmWriter) offset() int64 {
+func (w *fileWriter) offset() int {
 	return w.dataOffset
 }
 
-func (w *asmWriter) Write(p []byte) (n int, err error) {
+func (w *fileWriter) Write(p []byte) (n int, err error) {
 	n = len(p)
 	for _, b := range p {
-		w.buf[w.index] = b
-		w.index++
-		w.dataOffset++
-		if w.index == len(w.buf) {
-			err = w.flush()
+		if err == nil {
+			w.buf[w.index] = b
+			w.index++
+			w.dataOffset++
+			if w.index == len(w.buf) {
+				err = w.flush()
+			}
 		}
 	}
 
 	return
 }
 
-func (w *asmWriter) Close() error {
-	if w == nil || w.f == nil {
-		return os.ErrInvalid
-	}
-
-	f := w.f
-	w.f = nil
-
-	return f.Close()
-}
-
-func (w *asmWriter) footer() (err error) {
-	err = w.flush()
-
-	if err == nil {
-		_, err = fmt.Fprintf(w.f, "GLOBL ·%sData(SB),(NOPTR+RODATA),$%d\n", w.name, w.writeOffset)
-	}
-	return
-}
-
-func (w *asmWriter) flush() (err error) {
+func (w *fileWriter) flush() (err error) {
 
 	if w.index > 0 {
 		var sbuf = w.strBuf[0:0]
@@ -153,94 +115,44 @@ func (w *asmWriter) flush() (err error) {
 			sbuf = strconv.AppendUint(sbuf, uint64(w.buf[i]), 16)
 		}
 
-		_, err = fmt.Fprintf(w.f, "DATA ·%sData+%d(SB)/%d,$\"%s\"\n", w.name, w.writeOffset, w.index, sbuf)
-		w.writeOffset += int64(w.index)
+		if w.isGo {
+			if w.writeOffset != 0 {
+				_, err = fmt.Fprint(w.f, " +\n\t\t")
+			}
+			_, err = fmt.Fprintf(w.f, "\"%s\"", sbuf)
+		} else {
+			_, err = fmt.Fprintf(w.f, "DATA ·%sData+%d(SB)/%d,$\"%s\"\n", w.name, w.writeOffset, w.index, sbuf)
+		}
+		w.writeOffset += w.index
 		w.index = 0
 	}
 
 	return
 }
 
-func createGoWriter(name string, file *os.File) (w writer, err error) {
-	w = &goWriter{name: name, f: file}
+func (w *fileWriter) footer() (err error) {
+	err = w.flush()
 
-	_, err = fmt.Fprintf(file, `
-func %sBytes() []byte {
-	str := %sData
-	hdr := *(*reflect.StringHeader)(unsafe.Pointer(&str))
-	return *(*[]byte)(unsafe.Pointer(&reflect.SliceHeader{
-		Data: hdr.Data,
-		Len:  hdr.Len,
-		Cap:  hdr.Len,
-	}))
-}
-
-const (
-	%sData = `, name, name, name)
-
-	return
-}
-
-func (w *goWriter) offset() int64 {
-	return w.dataOffset
-}
-
-func (w *goWriter) Write(p []byte) (n int, err error) {
-	n = len(p)
-	for _, b := range p {
-		w.buf[w.index] = b
-		w.index++
-		w.dataOffset++
-		if w.index == len(w.buf) {
-			err = w.flush()
+	if err == nil {
+		if w.isGo {
+			_, err = fmt.Fprintln(w.f, "\n)")
+		} else {
+			_, err = fmt.Fprintf(w.f, "GLOBL ·%sData(SB),(NOPTR+RODATA),$%d\n", w.name, w.writeOffset)
 		}
 	}
-
 	return
 }
 
-func (w *goWriter) Close() error {
+func (w *fileWriter) Close() error {
 
 	if w == nil || w.f == nil {
 		return os.ErrInvalid
 	}
 
+	w.footer()
+
 	f := w.f
 	w.f = nil
 
 	return f.Close()
-}
-
-func (w *goWriter) footer() (err error) {
-	err = w.flush()
-
-	if err == nil {
-		_, err = fmt.Fprintln(w.f, "\n)")
-	}
-
-	return
-}
-
-func (w *goWriter) flush() (err error) {
-
-	if w.index > 0 {
-		var sbuf = w.strBuf[0:0]
-
-		for i := 0; i < w.index; i++ {
-			sbuf = append(sbuf, []byte("\\x")...)
-			if w.buf[i] < 0x10 {
-				sbuf = append(sbuf, '0')
-			}
-			sbuf = strconv.AppendUint(sbuf, uint64(w.buf[i]), 16)
-		}
-
-		if w.writeOffset != 0 {
-			_, err = fmt.Fprint(w.f, " +\n\t\t")
-		}
-		_, err = fmt.Fprintf(w.f, "\"%s\"", sbuf)
-		w.writeOffset += int64(w.index)
-		w.index = 0
-	}
-
-	return
 }

@@ -10,54 +10,54 @@ import (
 // FS return file system
 var FS embedded.FileSystem
 
-var templatesData [9212]byte
+var templatesData [9984]byte
 
 func init() {
 
 	bytes := templatesData[:]
 	str := *(*string)(unsafe.Pointer(&bytes))
 
-	FS = embedded.New()
+	FS = embedded.New(5)
 
-	FS.AddFile( /* /fs.go */ str[213:219],
-		/* fs.go */ str[214:219],
-		/* embedded/fs.go */ str[205:219],
-		10903, 1580660315,
-		/* text/plain; charset=utf-8 */ str[120:145],
-		/* ziA-uEEuOYNI20njNH65ZKDk1uM-gz */ str[0:30],
-		true, bytes[219:3714], str[219:3714])
+	FS.AddFile( /* /fs.go */ str[9978:9984],
+		/* fs.go */ str[9979:9984],
+		/* embedded/fs.go */ str[9970:9984],
+		12619, 1580863515,
+		/* text/plain; charset=utf-8 */ str[9885:9910],
+		/* rqo3SZUphWnHasV2kPDJxSIzqnc-gz */ str[9795:9825],
+		true, bytes[0:4022], str[0:4022])
 
-	FS.AddFile( /* /fs_test.go */ str[176:187],
-		/* fs_test.go */ str[177:187],
-		/* embedded/fs_test.go */ str[168:187],
-		10109, 1580660468,
-		/* text/plain; charset=utf-8 */ str[120:145],
-		/* HW4Sr7F-UveuFqaXGmqmDzS6g04-gz */ str[60:90],
-		true, bytes[3714:6305], str[3714:6305])
+	FS.AddFile( /* /fs_test.go */ str[9941:9952],
+		/* fs_test.go */ str[9942:9952],
+		/* embedded/fs_test.go */ str[9933:9952],
+		11316, 1580863702,
+		/* text/plain; charset=utf-8 */ str[9885:9910],
+		/* Dt5GhrgxUOMU6gM-uznd5jqgIcE-gz */ str[9855:9885],
+		true, bytes[4022:6839], str[4022:6839])
 
-	FS.AddFile( /* /server.go */ str[195:205],
-		/* server.go */ str[196:205],
-		/* embedded/server.go */ str[187:205],
-		4638, 1580609305,
-		/* text/plain; charset=utf-8 */ str[120:145],
-		/* -XYTpYRC4xaesCU6d-_hiaCcKsI-gz */ str[30:60],
-		true, bytes[6305:8164], str[6305:8164])
+	FS.AddFile( /* /server.go */ str[9960:9970],
+		/* server.go */ str[9961:9970],
+		/* embedded/server.go */ str[9952:9970],
+		4718, 1580861829,
+		/* text/plain; charset=utf-8 */ str[9885:9910],
+		/* XF8OTIBI5kQ6Wj11vR1ZkwxTg8U-gz */ str[9825:9855],
+		true, bytes[6839:8717], str[6839:8717])
 
-	FS.AddFile( /* /server_test.go */ str[153:168],
-		/* server_test.go */ str[154:168],
-		/* embedded/server_test.go */ str[145:168],
+	FS.AddFile( /* /server_test.go */ str[9918:9933],
+		/* server_test.go */ str[9919:9933],
+		/* embedded/server_test.go */ str[9910:9933],
 		2916, 1579886335,
-		/* text/plain; charset=utf-8 */ str[120:145],
-		/* EHgAPaGj3eKCf0MUJ1_d3tW0TDk-gz */ str[90:120],
-		true, bytes[8164:9212], str[8164:9212])
+		/* text/plain; charset=utf-8 */ str[9885:9910],
+		/* EHgAPaGj3eKCf0MUJ1_d3tW0TDk-gz */ str[9765:9795],
+		true, bytes[8717:9765], str[8717:9765])
 
-	FS.AddFolder( /* / */ str[124:125],
-		/* / */ str[124:125],
-		/* embedded */ str[145:153],
-		1580609318,
-		/* /fs.go */ str[213:219],
-		/* /fs_test.go */ str[176:187],
-		/* /server.go */ str[195:205],
-		/* /server_test.go */ str[153:168],
+	FS.AddFolder( /* / */ str[9889:9890],
+		/* / */ str[9889:9890],
+		/* embedded */ str[9910:9918],
+		1580863569,
+		/* /fs.go */ str[9978:9984],
+		/* /fs_test.go */ str[9941:9952],
+		/* /server.go */ str[9960:9970],
+		/* /server_test.go */ str[9918:9933],
 	)
 }

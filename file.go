@@ -10,6 +10,7 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"fmt"
+	"io/ioutil"
 	"mime"
 	"net/http"
 	"os"
@@ -26,14 +27,14 @@ import (
 type file struct {
 	name       string
 	baseName   string
-	data       []byte
 	local      string
-	Size       int64
+	Size       int
 	ModTime    int64
 	mimeType   string
 	tag        string
+	dataSize   int
 	Compressed bool
-	Offset     int64
+	offset     int
 
 	fileinfo os.FileInfo
 }
@@ -59,12 +60,8 @@ func (f *file) set() {
 	stringer.add(f.tag)
 }
 
-func (f *file) Data() []byte {
-	return f.data
-}
-
 func (f *file) Slice() string {
-	return fmt.Sprintf("%d:%d", f.Offset, f.Offset+int64(len(f.data)))
+	return fmt.Sprintf("%d:%d", f.offset, f.offset+f.dataSize)
 }
 
 func (f *file) Name() string {
@@ -86,27 +83,40 @@ func (f *file) Tag() string {
 	return stringer.slice(f.tag)
 }
 
-func (f *file) setMimeType() {
-	f.mimeType = mime.TypeByExtension(filepath.Ext(f.name))
-	if f.mimeType == "" {
-		// read a chunk to decide between utf-8 text and binary
-		f.mimeType = http.DetectContentType(f.data)
-	}
-}
+func (f *file) write(w writer) error {
+	var (
+		buf bytes.Buffer
+		gw  *gzip.Writer
+	)
 
-func (f *file) fill() {
-	hash := sha1.Sum(f.data)
-	f.tag = base64.RawURLEncoding.EncodeToString(hash[:]) + "-gz"
-	f.Size = int64(len(f.data))
-}
-
-func (f *file) compress() error {
-	var buf = &bytes.Buffer{}
-
-	gw, err := gzip.NewWriterLevel(buf, gzip.BestCompression)
+	f.offset = w.offset()
+	b, err := ioutil.ReadFile(f.local)
 
 	if err == nil {
-		_, err = gw.Write(f.data)
+		// Determine mimetype
+		f.mimeType = mime.TypeByExtension(filepath.Ext(f.name))
+		if f.mimeType == "" {
+			// read a chunk to decide between utf-8 text and binary
+			f.mimeType = http.DetectContentType(b)
+		}
+
+		// Minify the data
+		if m, e := minifier.Bytes(f.mimeType, b); e == nil {
+			b = m
+		}
+
+		// Create eTag
+		hash := sha1.Sum(b)
+		f.tag = base64.RawURLEncoding.EncodeToString(hash[:]) + "-gz"
+
+		f.Size = len(b)
+		f.dataSize = f.Size
+
+		gw, err = gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	}
+
+	if err == nil {
+		_, err = gw.Write(b)
 	}
 
 	if err == nil {
@@ -114,19 +124,20 @@ func (f *file) compress() error {
 	}
 
 	if err == nil {
-		if buf.Len() < len(f.data) {
-			f.data = buf.Bytes()
+		if buf.Len() < f.Size {
+			b = buf.Bytes()
+			f.dataSize = len(b)
 			f.Compressed = true
 		}
 	}
 
-	return err
-}
-
-func (f *file) minify() {
-	if b, err := minifier.Bytes(f.mimeType, f.data); err == nil {
-		f.data = b
+	if err == nil {
+		f.dataSize, err = w.Write(b)
 	}
+
+	f.set()
+
+	return err
 }
 
 func (d *dir) set() {

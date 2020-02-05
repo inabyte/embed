@@ -23,10 +23,10 @@ func TestStringsBuilder(t *testing.T) {
 	builder.add(endString)
 	builder.add(fullString)
 
-	builder.process()
+	builder.write(&mocWriter{})
 
 	buf := []byte(fullString)
-	if b := builder.bytes(); !reflect.DeepEqual(b, buf) {
+	if b := []byte(builder.str); !reflect.DeepEqual(b, buf) {
 		t.Errorf("Did not get expected buffer got (%v) expect (%v)", b, buf)
 	}
 
@@ -51,4 +51,21 @@ func TestStringsBuilder(t *testing.T) {
 		})
 	}
 
+}
+
+type mocWriter struct {
+	bytes []byte
+}
+
+func (m *mocWriter) offset() int {
+	return 0
+}
+
+func (m *mocWriter) Write(p []byte) (n int, err error) {
+	m.bytes = append(m.bytes, p...)
+	return len(p), nil
+}
+
+func (m *mocWriter) Close() error {
+	return nil
 }
