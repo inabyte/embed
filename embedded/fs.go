@@ -75,7 +75,7 @@ type FileInfo interface {
 	os.FileInfo
 	Compressed() bool // Is this file compressed
 	Tag() string      // Etag for the file contents
-	MimeType() string // file contens mimetype
+	MimeType() string // Mimetype for file contents
 	String() string   // file contents as string
 	Bytes() []byte    // file contents as byte array
 }

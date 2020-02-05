@@ -4,7 +4,7 @@ generates Go code that statically implements the a http.FileSystem.
 
 Features:
 
--	Efficient generated code without unneccessary overhead.
+-	Efficient generated code without unnecessary overhead.
 
 -	Minimizes html css and js files.
 

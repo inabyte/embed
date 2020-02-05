@@ -183,30 +183,13 @@ func TestFiles(t *testing.T) {
 				}
 
 				if !test.isDir {
-					testSeeking(t, test.file, file, test.expect)
+					testSeekStart(t, test.file, file, test.expect)
+					testSeekCurrent(t, test.file, file, test.expect)
+					testSeekEnd(t, test.file, file, test.expect)
+					testSeekBad(t, test.file, file, test.expect)
 				}
 
-				if _, err = file.Readdir(-1); err != nil {
-					if test.isDir {
-						t.Errorf("Got error Readdir for %s %v", test.file, err)
-					}
-				} else {
-					if !test.isDir {
-						t.Errorf("Did no get error Readdir for %s", test.file)
-					} else {
-						if _, err := file.Readdir(1); err == nil {
-							t.Errorf("Did not get error recall Readdir for %s", test.file)
-						}
-
-						if _, err := file.Seek(10, io.SeekCurrent); err == nil {
-							t.Errorf("Seek on folder did no return an err for %s", test.file)
-						}
-
-						if _, err := file.Seek(0, io.SeekStart); err != nil {
-							t.Errorf("Seek to begining of folder return error for %s %v", test.file, err)
-						}
-					}
-				}
+				testReadDir(t, test.file, file, test.isDir)
 
 				file.Close()
 				testClosed(t, test.file, file)
@@ -265,7 +248,7 @@ func makeFs() (string, FileSystem) {
 	return tmpdir, f
 }
 
-func testSeeking(t *testing.T, name string, file http.File, expect []byte) {
+func testSeekStart(t *testing.T, name string, file http.File, expect []byte) {
 	// Test SeekStart
 	if n, err := file.Seek(10, io.SeekStart); err == nil {
 		if b, err := ioutil.ReadAll(file); err == nil {
@@ -282,7 +265,9 @@ func testSeeking(t *testing.T, name string, file http.File, expect []byte) {
 	} else {
 		t.Errorf("Seek io.SeekStart on file return error for %s %v", name, err)
 	}
+}
 
+func testSeekCurrent(t *testing.T, name string, file http.File, expect []byte) {
 	// Test SeekCurrent
 	if _, err := file.Seek(0, io.SeekStart); err == nil {
 		if n, err := file.Seek(10, io.SeekCurrent); err == nil {
@@ -300,6 +285,9 @@ func testSeeking(t *testing.T, name string, file http.File, expect []byte) {
 			t.Errorf("Seek io.SeekCurrent on file return error for %s %v", name, err)
 		}
 	}
+}
+
+func testSeekEnd(t *testing.T, name string, file http.File, expect []byte) {
 
 	// Test SeekEnd
 	if n, err := file.Seek(-10, io.SeekEnd); err == nil {
@@ -318,6 +306,9 @@ func testSeeking(t *testing.T, name string, file http.File, expect []byte) {
 		t.Errorf("Seek io.SeekCurrent on file return error for %s %v", name, err)
 	}
 
+}
+
+func testSeekBad(t *testing.T, name string, file http.File, expect []byte) {
 	// test seek before start of file
 	if _, err := file.Seek(-10, io.SeekStart); err == nil {
 		t.Errorf("Did no get error for seek before start of file %s", name)
@@ -372,6 +363,30 @@ func testStat(t *testing.T, name string, file http.File, isDir bool, local bool)
 			}
 		}
 
+	}
+}
+
+func testReadDir(t *testing.T, name string, file http.File, isDir bool) {
+	if _, err := file.Readdir(-1); err != nil {
+		if isDir {
+			t.Errorf("Got error Readdir for %s %v", name, err)
+		}
+	} else {
+		if !isDir {
+			t.Errorf("Did no get error Readdir for %s", name)
+		} else {
+			if _, err := file.Readdir(1); err == nil {
+				t.Errorf("Did not get error recall Readdir for %s", name)
+			}
+
+			if _, err := file.Seek(10, io.SeekCurrent); err == nil {
+				t.Errorf("Seek on folder did no return an err for %s", name)
+			}
+
+			if _, err := file.Seek(0, io.SeekStart); err != nil {
+				t.Errorf("Seek to beginning of folder return error for %s %v", name, err)
+			}
+		}
 	}
 }
 

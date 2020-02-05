@@ -41,7 +41,7 @@ type Config struct {
 	// Include is the regexp for files to include. If provided, only files that
 	// match will be included.
 	Include string
-	// Minify is comma seperated list of mime type to minify.
+	// Minify is comma separated list of mime type to minify.
 	Minify string
 	// ModifyTime is the Unix timestamp to override as modification time for all files.
 	ModifyTime string
@@ -409,7 +409,9 @@ func (gen *generate) appendFiles(out *os.File, tests bool) {
 					for s, err = read.ReadString('\n'); err == nil && !strings.HasPrefix(s, "import"); s, err = read.ReadString('\n') {
 					}
 
-					for s, err = read.ReadString('\n'); err == nil && !strings.HasPrefix(s, ")"); s, err = read.ReadString('\n') {
+					if err == nil {
+						for s, err = read.ReadString('\n'); err == nil && !strings.HasPrefix(s, ")"); s, err = read.ReadString('\n') {
+						}
 					}
 
 					if err == nil {
