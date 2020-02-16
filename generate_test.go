@@ -29,7 +29,7 @@ func TestGenerate(t *testing.T) {
 	config.Output = filepath.Join(base, "assets", "files")
 	fpath := filepath.Join(base, "www")
 	l := len(fpath) - 4
-	fpath = fpath[:l] + prefixMarker + fpath[l:]
+	fpath = fpath[:l] + PrefixMarker + fpath[l:]
 	config.Files = []string{fpath, filepath.Join(base, "single", "settings.html")}
 	config.Ignore = `\.go$`
 	config.Include = `\.html$`

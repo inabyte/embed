@@ -1,8 +1,3 @@
-// Package embedded embed files
-//
-// Copyright 2020 Inabyte Inc. All rights reserved.
-// Use of this source code is governed by a MIT-style
-// license that can be found in the LICENSE.md file.
 package embedded
 
 import (
@@ -18,6 +13,8 @@ type Handler interface {
 	http.Handler
 	// SetNotFoundHandler set a hander to be called for no found
 	SetNotFoundHandler(http.Handler)
+	// SetPermissionHandler set a hander to be called for permission http.StatusForbidden
+	SetPermissionHandler(http.Handler)
 	// If true and the folder does not contain index.html render folder
 	// otherwise return 403 http.StatusForbidden
 	SetRenderFolders(enable bool)
@@ -26,11 +23,15 @@ type Handler interface {
 type server struct {
 	http.FileSystem
 	notFound      http.Handler
+	permission    http.Handler
 	sys           http.Handler
 	renderFolders bool
 }
 
-// GetFileServer create a http.handler server
+// GetFileServer create a http.handler
+// this will serve file from the embedded FileSystem.
+// Serving gzip files to clients that accept compressed content if the content is compressed.
+// Serving Etag-based conditional requests if specified.
 func GetFileServer(fs http.FileSystem) Handler {
 	return &server{
 		FileSystem:    fs,
@@ -42,6 +43,11 @@ func GetFileServer(fs http.FileSystem) Handler {
 // SetNotFoundHandler set a hander to be called for no found
 func (s *server) SetNotFoundHandler(h http.Handler) {
 	s.notFound = h
+}
+
+// SetPermissionHandler set a hander to be called for no found
+func (s *server) SetPermissionHandler(h http.Handler) {
+	s.permission = h
 }
 
 // If true and the folder does not contain index.html render folder
@@ -122,8 +128,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if reader, ok := f.(*reader); ok {
-		reader.serve(w, r)
+	// If the files implements a http.Handler user that otherwise pass to http.ServerContent
+	if handler, ok := f.(http.Handler); ok {
+		handler.ServeHTTP(w, r)
 	} else {
 		// ServeContent will check modification time
 		http.ServeContent(w, r, d.Name(), d.ModTime(), f)
@@ -148,6 +155,10 @@ func (s *server) toHTTPError(w http.ResponseWriter, r *http.Request, err error) 
 	} else {
 		if os.IsPermission(err) {
 			httpStatus = http.StatusForbidden
+			if s.permission != nil {
+				s.permission.ServeHTTP(w, r)
+				return
+			}
 		}
 	}
 
@@ -164,8 +175,8 @@ func localRedirect(w http.ResponseWriter, r *http.Request, newPath string) {
 	w.WriteHeader(http.StatusMovedPermanently)
 }
 
-// serve set various headers etag, content type
-func (f *reader) serve(w http.ResponseWriter, r *http.Request) {
+// ServeHTTP set various headers etag, content type and serve file
+func (f *reader) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tag := f.tag
 
 	// Check is requesting compressed and we have it compressed

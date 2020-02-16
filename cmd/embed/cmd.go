@@ -44,8 +44,9 @@ Where: <files> list of files and/or folders to embed
 	f.BoolVar(&conf.DisableCompression, "no-compress", conf.DisableCompression, "If true, do not compress files.")
 	f.BoolVar(&conf.Go, "go", conf.Go, "write only go files")
 	f.BoolVar(&conf.FileServer, "fileserver", conf.Binary, "produce http server code")
-	f.BoolVar(&conf.Binary, "binary", conf.Binary, "produce self-contained extracter/http server binary (<output> will become the binary name)")
-	f.BoolVar(&conf.Local, "local", conf.Local, "If true, do not reference external files.")
+	f.BoolVar(&conf.Binary, "binary", conf.Binary, "produce self-contained extractor/http server binary (<output> will become the binary name)")
+	f.BoolVar(&conf.NoRemote, "noremote", conf.NoRemote, "If true, zero dependencies on packages outside the standard library.")
+	f.BoolVar(&conf.NoLocalFS, "nolocalfs", conf.NoLocalFS, "if true, do not store local file system paths.")
 	f.Parse(os.Args[1:])
 
 	conf.Files = f.Args()

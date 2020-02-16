@@ -36,6 +36,7 @@ func TestFile(t *testing.T) {
 	f := file{
 		name:     "/scripts/test.html",
 		baseName: "test.html",
+		path:     "test.html",
 		local:    "test.html",
 		ModTime:  1579282495,
 	}
@@ -52,7 +53,7 @@ func TestFile(t *testing.T) {
 	}
 
 	if err == nil {
-		err = ioutil.WriteFile(f.local, []byte(rawContents), os.ModePerm)
+		err = ioutil.WriteFile(f.path, []byte(rawContents), os.ModePerm)
 	}
 
 	if err == nil {

@@ -1,8 +1,3 @@
-// Package embedded embed files
-//
-// Copyright 2020 Inabyte Inc. All rights reserved.
-// Use of this source code is governed by a MIT-style
-// license that can be found in the LICENSE.md file.
 package embedded
 
 import (
@@ -35,9 +30,9 @@ type FileSystem interface {
 	Copy(target string, mode os.FileMode) error
 
 	// AddFile add a file to embedded filesystem
-	AddFile(path string, name string, local string, size int64, modtime int64, mimeType string, tag string, compressed bool, data []byte, str string)
+	AddFile(path string, name string, local string, size int64, modtime int64, mimeType string, tag string, compressed bool, data []byte, str string) error
 	// AddFolder add a file to embedded filesystem
-	AddFolder(path string, name string, local string, modtime int64, paths ...string)
+	AddFolder(path string, name string, local string, modtime int64, paths ...string) error
 
 	// WriteFile writes data to a file named by filename.
 	// If the file does not exist, WriteFile creates it with permissions perm;
@@ -78,6 +73,7 @@ type FileInfo interface {
 	MimeType() string // Mimetype for file contents
 	String() string   // file contents as string
 	Bytes() []byte    // file contents as byte array
+	Raw() []byte      // raw bytes this is in readonly memory
 }
 
 type file struct {
@@ -95,11 +91,12 @@ type file struct {
 }
 
 type files struct {
-	list  map[string]*file
-	local bool
+	list      map[string]*file
+	local     bool
+	addFolder bool
 }
 
-// New creates a new Files that loads embedded content.
+// New creates a new FileSystem that loads embedded content.
 func New(count int) FileSystem {
 	return &files{list: make(map[string]*file, count)}
 }
@@ -203,8 +200,14 @@ func (fs *files) Copy(target string, mode os.FileMode) error {
 	})
 }
 
-// AddFile Adds a file to the file system
-func (fs *files) AddFile(path string, name string, local string, size int64, modtime int64, mimeType string, tag string, compressed bool, data []byte, str string) {
+// AddFile Adds a file to the file system, if entry already exists return an error
+func (fs *files) AddFile(path string, name string, local string, size int64,
+	modtime int64, mimeType string, tag string, compressed bool, data []byte, str string) (err error) {
+
+	if _, ok := fs.list[path]; ok {
+		return os.ErrExist
+	}
+
 	fs.list[path] = &file{
 		name:       name,
 		local:      local,
@@ -216,10 +219,25 @@ func (fs *files) AddFile(path string, name string, local string, size int64, mod
 		data:       data,
 		str:        str,
 	}
+
+	if fs.addFolder {
+		// Now add folder entries as required
+		if err = fs.addToFolder(path); err != nil {
+			delete(fs.list, path)
+		}
+	}
+
+	return
 }
 
-// AddFolder Adds a folder to the file system
-func (fs *files) AddFolder(path string, name string, local string, modtime int64, paths ...string) {
+// AddFolder Adds a folder to the file system, if entry already exists return an error
+func (fs *files) AddFolder(path string, name string, local string, modtime int64, paths ...string) error {
+	if _, ok := fs.list[path]; ok {
+		return os.ErrExist
+	}
+
+	fs.addFolder = true
+
 	subFiles := make([]FileInfo, len(paths))
 
 	for i, e := range paths {
@@ -233,6 +251,8 @@ func (fs *files) AddFolder(path string, name string, local string, modtime int64
 		modtime:  modtime,
 		subFiles: subFiles,
 	}
+
+	return nil
 }
 
 func (fs *files) addToFolder(filename string) (err error) {
@@ -256,6 +276,7 @@ func (fs *files) addToFolder(filename string) (err error) {
 
 	if err == nil {
 		f := fs.list[folder]
+		f.local = ""
 		f.subFiles = append(f.subFiles, fs.list[filename])
 		if len(f.subFiles) > 1 {
 			sort.Slice(f.subFiles, func(i, j int) bool {
@@ -375,6 +396,11 @@ func (f *file) Bytes() (buf []byte) {
 		}
 	}
 	return
+}
+
+// Raw bytes this is in readonly memory
+func (f *file) Raw() []byte {
+	return f.data
 }
 
 type reader struct {
