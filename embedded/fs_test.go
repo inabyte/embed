@@ -1,8 +1,3 @@
-// Package embedded embed files
-//
-// Copyright 2020 Inabyte Inc. All rights reserved.
-// Use of this source code is governed by a MIT-style
-// license that can be found in the LICENSE.md file.
 package embedded
 
 import (
@@ -19,6 +14,7 @@ import (
 	"reflect"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 const (
@@ -107,6 +103,76 @@ func TestWalk(t *testing.T) {
 		})
 	}
 
+}
+
+func TestAdd(t *testing.T) {
+
+	dir, f := makeFs()
+	defer os.RemoveAll(dir)
+
+	for _, test := range []struct {
+		name       string
+		file       string
+		isFile     bool
+		hasError   bool
+		data       []byte
+		compressed bool
+		size       int64
+	}{
+		{
+			name:     "Duplicate folder",
+			file:     "/files/js",
+			hasError: true,
+		},
+		{
+			name:       "Duplicate file",
+			file:       "/index.html",
+			isFile:     true,
+			hasError:   true,
+			data:       indexCompressed,
+			compressed: true,
+			size:       int64(len(index)),
+		},
+		{
+			name:       "Bad path",
+			file:       "/index.html/file.html",
+			isFile:     true,
+			hasError:   true,
+			data:       indexCompressed,
+			compressed: true,
+			size:       int64(len(index)),
+		},
+		{
+			name:       "Duplicate file",
+			file:       "/test/files/index.html",
+			isFile:     true,
+			data:       indexCompressed,
+			compressed: true,
+			size:       int64(len(index)),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var err error
+
+			if test.isFile {
+				str := *(*string)(unsafe.Pointer(&test.data))
+				err = f.AddFile(test.file, path.Base(test.file), "", test.size, time.Now().Unix(), "", "",
+					test.compressed, test.data, str)
+			} else {
+				err = f.AddFolder(test.file, path.Base(test.file), "", time.Now().Unix())
+			}
+
+			if err == nil {
+				if test.hasError {
+					t.Errorf("Did no get error as expected when adding %s", test.file)
+				}
+			} else {
+				if !test.hasError {
+					t.Errorf("Got unexpected when adding when adding %s %v", test.file, err)
+				}
+			}
+		})
+	}
 }
 
 func TestFiles(t *testing.T) {
@@ -410,6 +476,15 @@ func testInfo(t *testing.T, name string, file http.File, compressed bool, local 
 
 		if buf := info.Bytes(); !reflect.DeepEqual(buf, indexBytes) {
 			t.Errorf("FileInfo.String unexpected got (%v) expected %v for %s", buf, indexBytes, name)
+		}
+
+		expect := indexBytes
+		if info.Compressed() {
+			expect = indexCompressed
+		}
+
+		if buf := info.Raw(); !reflect.DeepEqual(buf, expect) {
+			t.Errorf("FileInfo.String unexpected got (%v) expected %v for %s", buf, expect, name)
 		}
 
 	} else {

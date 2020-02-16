@@ -27,6 +27,7 @@ import (
 type file struct {
 	name       string
 	baseName   string
+	path       string
 	local      string
 	Size       int
 	ModTime    int64
@@ -90,7 +91,7 @@ func (f *file) write(w writer) error {
 	)
 
 	f.offset = w.offset()
-	b, err := ioutil.ReadFile(f.local)
+	b, err := ioutil.ReadFile(f.path)
 
 	if err == nil {
 		// Determine mimetype

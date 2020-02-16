@@ -1,8 +1,3 @@
-// Package embedded embed files
-//
-// Copyright 2020 Inabyte Inc. All rights reserved.
-// Use of this source code is governed by a MIT-style
-// license that can be found in the LICENSE.md file.
 package embedded
 
 import (
@@ -19,6 +14,9 @@ func TestLocalWebServe(t *testing.T) {
 
 	s := GetFileServer(fs)
 	s.SetNotFoundHandler(http.HandlerFunc(http.NotFound))
+	s.SetPermissionHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+	}))
 
 	for _, tt := range []struct {
 		name          string
