@@ -16,7 +16,7 @@ vendor/
 bin/
 .vscode/
 go.sum
-embed
-binary
-code
+/embed
+/binary
+/code
 Makefile
