@@ -121,9 +121,9 @@ func main() {
 	`go run .`
 3. Access http://localhost:8080/ to view the content.
 
-You can see worked example in [example/binary](example/binary) dir
+You can see a worked example in [examples/binary](examples/binary) dir
 just run it as
-`go run ./example/binary`
+`go run ./examples/binary`
 
 
 
@@ -227,7 +227,7 @@ func main() {
 	`go run .`
 3. Access http://localhost:8080/ to view the content.
 
-You can see worked example in [example/code](example/code) dir
+You can see a worked example in [examples/code](examples/code) dir
 just run it as
-`go run ./example/code`
+`go run ./examples/code`
 
