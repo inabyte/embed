@@ -102,6 +102,7 @@ func New(count int) FileSystem {
 }
 
 func (fs *files) Open(name string) (file http.File, err error) {
+	name = path.Clean("/" + name)
 	if f, ok := fs.list[name]; ok {
 		if fs.local && len(f.local) > 0 {
 			file, err = os.Open(f.local)

@@ -201,6 +201,12 @@ func TestFiles(t *testing.T) {
 			compressed: true,
 		},
 		{
+			name:       "index no path",
+			file:       "index.html",
+			expect:     indexBytes,
+			compressed: true,
+		},
+		{
 			name:   "settings",
 			file:   "/settings.html",
 			expect: indexBytes,
